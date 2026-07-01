@@ -19,7 +19,6 @@ model User {
   profilePictureUrl String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
-
   events Event[]
   rsvps  Rsvp[]
 	bookmarks Event[]  @relation("UserBookmarks")
@@ -30,6 +29,8 @@ model Event {
   title        String
   description  String
   date         DateTime
+	imageUrl     String?
+	imagePublicId  String?
   location     String
   maxCapacity  Int
   organizerId  Int
@@ -39,7 +40,7 @@ model Event {
 
   organizer User   @relation(fields: [organizerId], references: [id])
   rsvps     Rsvp[]
-	bookmarkedByUsers User[] @relation("UserBookmarks") 
+	bookmarkedByUsers User[] @relation("UserBookmarks")
 }
 
 model Rsvp {
@@ -56,3 +57,7 @@ model Rsvp {
 
   @@unique([userId, eventId]) // One RSVP per user per event
 }
+
+
+//npx prisma generate
+//npx prisma migrate dev --name add_bookmarks

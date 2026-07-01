@@ -1,25 +1,33 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
+  InternalServerErrorException,
   Param,
   ParseIntPipe,
   Post,
   Put,
   Query,
+  Req,
   Request,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { CreateEventDto } from './dto/create-event.dto';
+import { CreateRsvpDto } from './dto/create-rsvp.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventsService } from './events.service';
 import { RsvpService } from './rsvp.service';
-import { CreateRsvpDto } from './dto/create-rsvp.dto';
 
 @Controller('events')
 export class EventsController {
@@ -94,5 +102,37 @@ export class EventsController {
   @UseGuards(JwtGuard)
   toggleBookmark(@Param('id', ParseIntPipe) id: number, @Request() req) {
     return this.eventsService.toggleBookmark(req.user.userId, id);
+  }
+
+  //Upload//
+  @Post(':id/upload-image')
+  @UseGuards(JwtGuard)
+  @UseInterceptors(
+    FileInterceptor('image', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  async uploadEventImage(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Image file is required');
+    }
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException('File must be an image');
+    }
+    try {
+      return this.eventsService.updateImage(id, req.user.userId, file);
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException
+      ) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Image upload failed');
+    }
   }
 }

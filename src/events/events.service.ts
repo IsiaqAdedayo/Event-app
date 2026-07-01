@@ -3,17 +3,22 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 
 @Injectable()
 export class EventsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cloudinaryService: CloudinaryService,
+  ) {}
 
   async create(userId: number, createEventDto: CreateEventDto) {
     return this.prisma.event.create({
@@ -198,5 +203,51 @@ export class EventsService {
       maxCapacity: event.maxCapacity,
       rsvpCount: event.rsvps.length,
     }));
+  }
+
+  async updateImage(id: number, userId: number, file: Express.Multer.File) {
+    const event = await this.prisma.event.findUnique({ where: { id } });
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+    if (event.organizerId !== userId) {
+      throw new ForbiddenException('Only organizer can update event image');
+    }
+
+    const { url, publicId } = await this.cloudinaryService.uploadImage(
+      file,
+      id,
+    );
+
+    // Optimistic concurrency: only commit if imagePublicId hasn't moved since
+    // we read it. If another request updated it in between, this affects 0 rows.
+    const result = await this.prisma.event.updateMany({
+      where: { id, imagePublicId: event.imagePublicId },
+      data: { imageUrl: url, imagePublicId: publicId },
+    });
+
+    if (result.count === 0) {
+      // lost the race — our upload is now orphaned, clean it up before failing
+      await this.cloudinaryService.deleteImage(publicId).catch(() => undefined);
+      throw new ConflictException('Image was updated concurrently, retry');
+    }
+
+    let cleanupWarning: string | undefined;
+    if (event.imagePublicId) {
+      await this.cloudinaryService
+        .deleteImage(event.imagePublicId)
+        .catch((err) => {
+          console.error(
+            `Failed to delete old image ${event.imagePublicId}:`,
+            err,
+          );
+          cleanupWarning = 'Old image could not be deleted';
+        });
+    }
+
+    const updated = await this.prisma.event.findUnique({ where: { id } });
+    return cleanupWarning
+      ? { ...updated, imageCleanupWarning: cleanupWarning }
+      : updated;
   }
 }
